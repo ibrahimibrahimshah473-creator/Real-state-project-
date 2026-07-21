@@ -9,14 +9,18 @@ export async function POST(req: Request) {
   try {
     const session = await getServerSession(authOptions);
 
-    if (!session) {
+    // Check authentication and user ID
+    if (!session?.user?.id) {
       return NextResponse.json(
         { error: "Unauthorized" },
         { status: 401 }
       );
     }
 
-    const userRole = (session.user as any).role?.toLowerCase();
+    const userId = session.user.id;
+
+    // Check admin role
+    const userRole = (session.user as { role?: string }).role?.toLowerCase();
 
     if (userRole !== "admin") {
       return NextResponse.json(
@@ -50,6 +54,7 @@ export async function POST(req: Request) {
       ? JSON.parse(featuresRaw)
       : [];
 
+    // Validate required fields
     if (
       !title ||
       !description ||
@@ -63,13 +68,13 @@ export async function POST(req: Request) {
     ) {
       return NextResponse.json(
         {
-          error:
-            "Please fill all required fields",
+          error: "Please fill all required fields",
         },
         { status: 400 }
       );
     }
 
+    // Upload images
     const images: string[] = [];
 
     const files = formData.getAll("images") as File[];
@@ -77,11 +82,11 @@ export async function POST(req: Request) {
     for (const file of files) {
       if (file && file.size > 0) {
         const imageUrl = await uploadImage(file);
-
         images.push(imageUrl);
       }
     }
 
+    // Check images
     if (images.length === 0) {
       return NextResponse.json(
         {
@@ -91,12 +96,12 @@ export async function POST(req: Request) {
       );
     }
 
+    // Create property
     const [property] = await db
       .insert(properties)
       .values({
         title,
         description,
-
         price: Math.round(price),
 
         type,
@@ -111,7 +116,6 @@ export async function POST(req: Request) {
           : null,
 
         area: Math.round(area),
-
         areaUnit,
 
         address,
@@ -121,7 +125,7 @@ export async function POST(req: Request) {
         images,
         features,
 
-        userId: session.user.id,
+        userId,
       })
       .returning();
 
