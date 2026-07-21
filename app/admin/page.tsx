@@ -148,7 +148,7 @@ export default async function AdminPage() {
 
                     {/* City */}
                     <td className="px-4 py-3">
-                      {property.city}
+                      {property.location}
                     </td>
 
                     {/* Price */}
