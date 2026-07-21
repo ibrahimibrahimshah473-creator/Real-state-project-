@@ -1,67 +1,146 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
+import { db } from "@/lib/db";
+import { properties } from "@/lib/schema";
 import { uploadImage } from "@/lib/cloudinary";
 
 export async function POST(req: Request) {
   try {
     const session = await getServerSession(authOptions);
-    if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    if ((session.user as any).role !== "ADMIN") {
-      return NextResponse.json({ error: "Admin only" }, { status: 403 });
+
+    if (!session) {
+      return NextResponse.json(
+        { error: "Unauthorized" },
+        { status: 401 }
+      );
+    }
+
+    const userRole = (session.user as any).role?.toLowerCase();
+
+    if (userRole !== "admin") {
+      return NextResponse.json(
+        { error: "Admin only" },
+        { status: 403 }
+      );
     }
 
     const formData = await req.formData();
-    const images: string[] = [];
-    const files = formData.getAll("images") as File[];
-    for (const file of files) {
-      const url = await uploadImage(file);
-      images.push(url);
+
+    const title = formData.get("title") as string;
+    const description = formData.get("description") as string;
+    const price = Number(formData.get("price"));
+
+    const type = formData.get("type") as string;
+    const status = formData.get("status") as string;
+
+    const bedroomsValue = formData.get("bedrooms") as string;
+    const bathroomsValue = formData.get("bathrooms") as string;
+
+    const area = Number(formData.get("area"));
+    const areaUnit = formData.get("areaUnit") as string;
+
+    const address = formData.get("address") as string;
+    const city = formData.get("city") as string;
+    const state = formData.get("state") as string;
+
+    const featuresRaw = formData.get("features") as string;
+
+    const features = featuresRaw
+      ? JSON.parse(featuresRaw)
+      : [];
+
+    if (
+      !title ||
+      !description ||
+      !price ||
+      !type ||
+      !status ||
+      !area ||
+      !address ||
+      !city ||
+      !state
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            "Please fill all required fields",
+        },
+        { status: 400 }
+      );
     }
 
-    const property = await prisma.property.create({
-      data: {
-        title: formData.get("title") as string,
-        description: formData.get("description") as string,
-        price: parseFloat(formData.get("price") as string),
-        type: formData.get("type") as any,
-        status: formData.get("status") as any,
-        bedrooms: parseInt(formData.get("bedrooms") as string) || null,
-        bathrooms: parseInt(formData.get("bathrooms") as string) || null,
-        area: parseFloat(formData.get("area") as string),
-        areaUnit: (formData.get("areaUnit") as string) || "marla",
-        address: formData.get("address") as string,
-        city: formData.get("city") as string,
-        state: formData.get("state") as string,
+    const images: string[] = [];
+
+    const files = formData.getAll("images") as File[];
+
+    for (const file of files) {
+      if (file && file.size > 0) {
+        const imageUrl = await uploadImage(file);
+
+        images.push(imageUrl);
+      }
+    }
+
+    if (images.length === 0) {
+      return NextResponse.json(
+        {
+          error: "At least one image is required",
+        },
+        { status: 400 }
+      );
+    }
+
+    const [property] = await db
+      .insert(properties)
+      .values({
+        title,
+        description,
+
+        price: Math.round(price),
+
+        type,
+        status,
+
+        bedrooms: bedroomsValue
+          ? Number(bedroomsValue)
+          : null,
+
+        bathrooms: bathroomsValue
+          ? Number(bathroomsValue)
+          : null,
+
+        area: Math.round(area),
+
+        areaUnit,
+
+        address,
+        city,
+        state,
+
         images,
-        features: JSON.parse(formData.get("features") as string || "[]"),
+        features,
+
         userId: session.user.id,
+      })
+      .returning();
+
+    return NextResponse.json(
+      {
+        success: true,
+        message: "Property created successfully",
+        property,
       },
-    });
+      { status: 201 }
+    );
+  } catch (error) {
+    console.error("Property creation error:", error);
 
-    return NextResponse.json(property);
-  } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json(
+      {
+        error: "Failed to create property",
+      },
+      { status: 500 }
+    );
   }
-}
-
-export async function GET(req: Request) {
-  const { searchParams } = new URL(req.url);
-  const city = searchParams.get("city");
-  const status = searchParams.get("status");
-  const type = searchParams.get("type");
-
-  const where: any = { published: true };
-  if (city) where.city = city;
-  if (status) where.status = status;
-  if (type) where.type = type;
-
-  const properties = await prisma.property.findMany({
-    where,
-    include: { user: { select: { name: true } } },
-    orderBy: { createdAt: "desc" },
-  });
-
-  return NextResponse.json(properties);
 }
